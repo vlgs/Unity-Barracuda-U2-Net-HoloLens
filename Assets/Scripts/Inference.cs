@@ -1,4 +1,4 @@
-﻿#define WEBCAM
+#define WEBCAM
 
 using System;
 using System.Collections;
@@ -84,11 +84,15 @@ public class Inference : MonoBehaviour
 
 #else
         var targetRT = RenderTexture.GetTemporary(inputResolutionX, inputResolutionY, 0);
-
-        float ratio = inputImage.height/inputImage.width;
-
-        Graphics.Blit(inputImage, targetRT, new Vector2(ratio,1f), new Vector2(0.3f,0f));//postprocessMaterial);
+        Graphics.Blit(inputImage, targetRT, new Vector2(.5f,1f), new Vector2(0.3f,0f));//postprocessMaterial);
         m_Input = new Tensor(targetRT, 3);
+
+        Texture2D result = new Texture2D(inputResolutionX, inputResolutionY,TextureFormat.RGBA32, 0, false);
+        result.SetPixels(inputImage.GetPixels(0,0, inputResolutionX, inputResolutionY));
+        result.Apply();
+
+        Tensor input = TransformInput(result.GetPixels32(), inputResolutionX, inputResolutionY);
+
 
         preprocessMaterial.mainTexture = targetRT;
 
@@ -106,7 +110,6 @@ public class Inference : MonoBehaviour
     private const int IMAGE_MEAN = 0;
     private const float IMAGE_STD = 1f;
 
-
     public static Tensor TransformInput(Color32[] pic, int width, int height)
     {
         float[] floatValues = new float[width * height * 3];
@@ -123,92 +126,87 @@ public class Inference : MonoBehaviour
         return new Tensor(1, height, width, 3, floatValues);
     }
 
+
     void Update()
     {
 #if (WEBCAM)
+        // float ratio = (float)m_WebcamTexture.height/(float)m_WebcamTexture.width;
+        // var targetRT = RenderTexture.GetTemporary(inputResolutionX, inputResolutionY, 0);
+        // Graphics.Blit(m_WebcamTexture, targetRT, new Vector2(ratio,1f), new Vector2(0f,0f));
 
-        float ratio = (float)m_WebcamTexture.height/(float)m_WebcamTexture.width;
+        Texture2D result = new Texture2D(inputResolutionX, inputResolutionY,TextureFormat.RGBA32, 0, false);
+        result.SetPixels(m_WebcamTexture.GetPixels(0,0, inputResolutionX, inputResolutionY));
+        result.Apply();
+        preprocessMaterial.mainTexture = result;
 
-        var targetRT = RenderTexture.GetTemporary(inputResolutionX, inputResolutionY, 0);
-        Graphics.Blit(m_WebcamTexture, targetRT, new Vector2(ratio,1f), new Vector2(0f,0f));
-        
-        var result = new Texture2D (inputResolutionX, inputResolutionY, TextureFormat.RGB24, false);
-        result.SetPixels(m_WebcamTexture.GetPixels(0,0,inputResolutionX, inputResolutionY));
         Tensor input = TransformInput(result.GetPixels32(), inputResolutionX, inputResolutionY);
 #else
         Tensor input = m_Input;
 #endif
         m_Worker.Execute(input);
-        Tensor yoloModelOutput = m_Worker.PeekOutput();
+        Tensor tensor = m_Worker.PeekOutput("grid");
 
-        var boxes = new List<BoundingBox>();
+        float[] res = tensor.data.Download(tensor.shape);
+        // float[] result = tensor.ToReadOnlyArray();
+
+        List<YoloResult> results = new List<YoloResult>();
 
         for (int cy = 0; cy < COL_COUNT; cy++)
         {
             for (int cx = 0; cx < ROW_COUNT; cx++)
             {
-                for (int box = 0; box < BOXES_PER_CELL; box++)
+                for (int b = 0; b < BOXES_PER_CELL; b++)
                 {
-                    var channel = (box * (CLASS_COUNT + BOX_INFO_FEATURE_COUNT));
-                    var bbd = ExtractBoundingBoxDimensions(yoloModelOutput, cx, cy, channel);
-                    float confidence = GetConfidence(yoloModelOutput, cx, cy, channel);
-
-                    if (confidence < confidenceThreshold)
-                    {
-                        continue;
-                    }
-
-                    float[] predictedClasses = ExtractClasses(yoloModelOutput, cx, cy, channel);
-                    var (topResultIndex, topResultScore) = GetTopResult(predictedClasses);
-                    var topScore = topResultScore * confidence;
-
-                    if (topScore < confidenceThreshold)
-                    {
-                        continue;
-                    }
-
-                    var mappedBoundingBox = MapBoundingBoxToCell(cx, cy, box, bbd);
-                    boxes.Add(new BoundingBox
-                    {
-                        Dimensions = new BoundingBoxDimensions
-                        {
-                            X = (mappedBoundingBox.X - mappedBoundingBox.Width / 2),
-                            Y = (mappedBoundingBox.Y - mappedBoundingBox.Height / 2),
-                            Width = mappedBoundingBox.Width,
-                            Height = mappedBoundingBox.Height,
-                        },
-                        Confidence = topScore,
-                        Label = ((Classes) topResultIndex).ToString()
-                    });
-
-                    print(((Classes) topResultIndex).ToString());
-
+                    var channel = (b * (CLASS_COUNT + BOX_INFO_FEATURE_COUNT));
+                    
+                    float tx = tensor[0,cx,cy,channel];
+                    float ty = tensor[0,cx,cy,channel + 1];
+                    float tw = tensor[0,cx,cy,channel + 2];
+                    float th = tensor[0,cx,cy,channel + 3];
+                    float tc = tensor[0,cx,cy,channel + 4];
+                    
                     /*
+                    float tx = res[offset(channel    ,cx,cy)];
+                    float ty = res[offset(channel + 1,cx,cy)];
+                    float tw = res[offset(channel + 2,cx,cy)];
+                    float th = res[offset(channel + 3,cx,cy)];
+                    float tc = res[offset(channel + 4,cx,cy)];
+                    */
+                    
+                    
+                    float x = ((float)cy + Sigmoid(tx)) * CELL_WIDTH;
+                    float y = ((float)cx + Sigmoid(ty)) * CELL_HEIGHT;
+
+                    float w = Mathf.Exp(tw) * anchors[2*b    ] * CELL_WIDTH;
+                    float h = Mathf.Exp(th) * anchors[2*b + 1] * CELL_HEIGHT;
+
+                    float confidence = Sigmoid(tc);
+
+                    if(confidence < confidenceThreshold)
+                        continue;
+
                     var classes = new float[CLASS_COUNT];
                     for (int c = 0; c < CLASS_COUNT; c++)
                     {
-                        // classes[c] = result[offset(channel + 5 + c, cx, cy)];
-                        classes[c] = (float)tensor[GetOffset(cx, cy, channel + 5 + c)];
-                        // classes[c] = (float)result[tensor.Index(0, cy, cx, channel + 5 + c)];
+                        classes[c] = tensor[0,cx,cy,channel + 5 + c];
+                        // classes[c] = res[offset(channel + 5 + c,cx,cy)];
                     }
 
                     //softmax this
-                    classes = Softmax(classes);
-                    // var z_exp = classes.Select(Mathf.Exp);
-                    // var sum_z_exp = z_exp.Sum();
-                    // classes = z_exp.Select(i => i / sum_z_exp).ToArray();
-
+                    // classes = Softmax(classes);
+                    var z_exp = classes.Select(Mathf.Exp);
+                    var sum_z_exp = z_exp.Sum();
+                    classes = z_exp.Select(i => i / sum_z_exp).ToArray();
+                    
                     //argmax
                     float bestClassScore = classes.Max();
                     int bestClass = classes.ToList().IndexOf(bestClassScore);
 
                     float confidenceInClass = bestClassScore * confidence;
 
-
                     if(confidenceInClass > confidenceThreshold)
                     {
-                        print($"{(Classes)bestClass} : {(confidenceInClass*100).ToString("00")}% ({x};{y};{w};{h})");
-                        print(bestClassScore);
+                        print($"{(Classes)bestClass} : {(bestClassScore*100).ToString("00")}% ({x};{y};{w};{h})");
 
                         results.Add(new YoloResult(){
                             x = x,
@@ -219,14 +217,12 @@ public class Inference : MonoBehaviour
                             classes = classes,
                         });
                     }
-                    */
                 }
             }
 
         }
 
-
-        print(boxes.Count);
+        print($"#### {results.Count}");
 
         /*
         RenderTexture resultMask = new RenderTexture(inputResolutionX, inputResolutionY, 0);
@@ -238,7 +234,7 @@ public class Inference : MonoBehaviour
 
         //postprocessMaterial.mainTexture = resultMask;
 #if (WEBCAM)
-        preprocessMaterial.mainTexture = targetRT;
+        // preprocessMaterial.mainTexture = targetRT;
 #endif
         input.Dispose();
     }
@@ -250,8 +246,6 @@ public class Inference : MonoBehaviour
 #endif
         m_Worker.Dispose();
     }
-
-
 
     private float Sigmoid(float value)
     {
@@ -269,97 +263,31 @@ public class Inference : MonoBehaviour
     }
 
 
-    private BoundingBoxDimensions ExtractBoundingBoxDimensions(Tensor modelOutput, int x, int y, int channel)
+    private int GetOffset(int x, int y, int channel)
     {
-        return new BoundingBoxDimensions
-        {
-            X = modelOutput[0, x, y, channel],
-            Y = modelOutput[0, x, y, channel + 1],
-            Width = modelOutput[0, x, y, channel + 2],
-            Height = modelOutput[0, x, y, channel + 3]
-        };
+        // YOLO outputs a tensor that has a shape of 125x13x13, which
+        // WinML flattens into a 1D array.  To access a specific channel
+        // for a given (x,y) cell position, we need to calculate an offset
+        // into the array
+        return (channel * ROW_COUNT * COL_COUNT) + (y * COL_COUNT) + x;
+    }
+
+    private int offset(int channel, int x, int y)
+    {
+        return GetOffset(x,y,channel);
+        // return (channel * 25) + (y * COL_COUNT) + x;
+        // return channel*CHANNEL_COUNT + y*COL_COUNT + x*ROW_COUNT;
     }
 
 
-    private float GetConfidence(Tensor modelOutput, int x, int y, int channel)
-    {
-        return Sigmoid(modelOutput[0, x, y, channel + 4]);
-    }
-
-
-    private CellDimensions MapBoundingBoxToCell(int x, int y, int box, BoundingBoxDimensions boxDimensions)
-    {
-        return new CellDimensions
-        {
-            X = ((float)y + Sigmoid(boxDimensions.X)) * CELL_WIDTH,
-            Y = ((float)x + Sigmoid(boxDimensions.Y)) * CELL_HEIGHT,
-            Width = (float)Math.Exp(boxDimensions.Width) * CELL_WIDTH * anchors[box * 2],
-            Height = (float)Math.Exp(boxDimensions.Height) * CELL_HEIGHT * anchors[box * 2 + 1],
-        };
-    }
-
-
-    public float[] ExtractClasses(Tensor modelOutput, int x, int y, int channel)
-    {
-        float[] predictedClasses = new float[CLASS_COUNT];
-        int predictedClassOffset = channel + BOX_INFO_FEATURE_COUNT;
-
-        for (int predictedClass = 0; predictedClass < CLASS_COUNT; predictedClass++)
-        {
-            predictedClasses[predictedClass] = modelOutput[0, x, y, predictedClass + predictedClassOffset];
-        }
-
-        return Softmax(predictedClasses);
-    }
-
-
-    private ValueTuple<int, float> GetTopResult(float[] predictedClasses)
-    {
-        return predictedClasses
-            .Select((predictedClass, index) => (Index: index, Value: predictedClass))
-            .OrderByDescending(result => result.Value)
-            .First();
-    }
     internal struct YoloResult{
         internal float x,y,width,height,confidence;
         internal float[] classes;
     }
 
-    public class DimensionsBase
-    {
-        public float X { get; set; }
-        public float Y { get; set; }
-        public float Height { get; set; }
-        public float Width { get; set; }
-    }
-
-
-    public class BoundingBoxDimensions : DimensionsBase { }
-
-    class CellDimensions : DimensionsBase { }
-
-
-    public class BoundingBox
-    {
-        public BoundingBoxDimensions Dimensions { get; set; }
-
-        public string Label { get; set; }
-
-        public float Confidence { get; set; }
-
-        public Rect Rect
-        {
-            get { return new Rect(Dimensions.X, Dimensions.Y, Dimensions.Width, Dimensions.Height); }
-        }
-
-        public override string ToString()
-        {
-            return $"{Label}:{Confidence}, {Dimensions.X}:{Dimensions.Y} - {Dimensions.Width}:{Dimensions.Height}";
-        }
-    }
-
     public const int ROW_COUNT = 13;
     public const int COL_COUNT = 13;
+    public const int CHANNEL_COUNT = 125;
     public const int BOXES_PER_CELL = 5;
     public const int BOX_INFO_FEATURE_COUNT = 5;
     public const int CLASS_COUNT = 20;
