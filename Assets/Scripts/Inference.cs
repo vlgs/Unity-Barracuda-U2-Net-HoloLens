@@ -1,13 +1,15 @@
-﻿
-using System.Collections;
-using System.Collections.Generic;
+﻿#define WEBCAM
+
 using UnityEngine;
 using Unity.Barracuda;
-using System.Linq;
-using System;
 
-#if WEBCAM && UNITY_WSA
+#if WEBCAM
+using System;
+using System.Linq;
+
+#if UNITY_WSA
 using UnityEngine.Windows.WebCam;
+#endif
 #endif
 
 public class Inference : MonoBehaviour
@@ -21,7 +23,6 @@ public class Inference : MonoBehaviour
     public Texture2D inputImage;
 #endif
 
-
     public NNModel inputModel;
     public Material preprocessMaterial;
     public Material postprocessMaterial;
@@ -29,7 +30,7 @@ public class Inference : MonoBehaviour
     public int inputResolutionY = 32;
     public int inputResolutionX = 32;
 
-#if UNITY_WSA
+#if (WEBCAM) && UNITY_WSA
     UnityEngine.Windows.WebCam.VideoCapture m_VideoCapture = null;
 #endif
 
@@ -41,7 +42,6 @@ public class Inference : MonoBehaviour
         m_Worker = WorkerFactory.CreateWorker(WorkerFactory.Type.ComputePrecompiled, m_RuntimeModel, false);
 
 #if (WEBCAM)
-
 #if UNITY_WSA 
         Resolution cameraResolution = VideoCapture.SupportedResolutions.OrderByDescending((res) => res.width * res.height).First();
         Debug.Log(cameraResolution);
@@ -75,8 +75,7 @@ public class Inference : MonoBehaviour
 #else
         m_WebcamTexture = new WebCamTexture();
         m_WebcamTexture.Play();
-#endif
-
+#endif // !(UNITY_WSA)
 #else
         //Setting texture for previsualizing input
         preprocessMaterial.mainTexture = inputImage;
@@ -87,7 +86,7 @@ public class Inference : MonoBehaviour
         m_Input = new Tensor(targetRT, 3);
         
         //m_Input = new Tensor(1, inputResolutionY, inputResolutionX, 3);
-#endif
+#endif //(WEBCAM)
     }
 
 #if (WEBCAM)
@@ -106,7 +105,7 @@ public class Inference : MonoBehaviour
         Tensor input = new Tensor(targetRT, 3);
 #else
         Tensor input = m_Input;
-#endif
+#endif //!(WEBCAM)
         m_Worker.Execute(input);
         Tensor result = m_Worker.PeekOutput("output");
         
