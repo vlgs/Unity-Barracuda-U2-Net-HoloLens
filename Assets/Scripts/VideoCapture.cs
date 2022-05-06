@@ -3,23 +3,26 @@
 // Licensed under the Apache 2.0 license. See LICENSE file in the project root for full license information.
 //
 
-#if UNITY_WSA 
+#if UNITY_WSA && ENABLE_WINMD_SUPPORT
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
-using System.Threading.Tasks;
+using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using System.Runtime.InteropServices.WindowsRuntime;
+
+using Windows.Graphics.Imaging;
 
 using Windows.Devices.Enumeration;
+using Windows.Foundation;
+using Windows.Foundation.Collections;
 using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
 using Windows.Media.MediaProperties;
 using Windows.Media.Effects;
 using Windows.Perception.Spatial;
-using Windows.Foundation.Collections;
-using Windows.Foundation;
-using System.Diagnostics;
-using System.Numerics;
 
 namespace HoloLensCameraStream
 {
@@ -231,7 +234,7 @@ namespace HoloLensCameraStream
         /// </summary>
         /// <param name="setupParams">Parameters that change how video mode is used.</param>
         /// <param name="onVideoModeStartedCallback">This callback will be invoked once video mode has been activated.</param>
-        public async void StartVideoModeAsync(UnityEngine.Windows.WebCam.CameraParameters setupParams, OnVideoModeStartedCallback onVideoModeStartedCallback)
+        public async void StartVideoModeAsync(CameraParameters setupParams, OnVideoModeStartedCallback onVideoModeStartedCallback)
         {
             var mediaFrameSource = _mediaCapture.FrameSources[_frameSourceInfo.Id]; //Returns a MediaFrameSource
 
@@ -375,7 +378,7 @@ namespace HoloLensCameraStream
             }
         }
 
-        VideoEncodingProperties GetVideoEncodingPropertiesForCameraParams(UnityEngine.Windows.WebCam.CameraParameters cameraParams)
+        VideoEncodingProperties GetVideoEncodingPropertiesForCameraParams(CameraParameters cameraParams)
         {
             var allPropertySets = _mediaCapture.VideoDeviceController.GetAvailableMediaStreamProperties(STREAM_TYPE).Select((x) => x as VideoEncodingProperties)
                 .Where((x) =>
@@ -407,17 +410,17 @@ namespace HoloLensCameraStream
                 sourceInfo.SourceKind == MediaFrameSourceKind.Color);
         }
 
-        static string ConvertCapturePixelFormatToMediaEncodingSubtype(UnityEngine.Windows.WebCam.CapturePixelFormat format)
+        static string ConvertCapturePixelFormatToMediaEncodingSubtype(CapturePixelFormat format)
         {
             switch (format)
             {
-                case UnityEngine.Windows.WebCam.CapturePixelFormat.BGRA32:
+                case CapturePixelFormat.BGRA32:
                     return MediaEncodingSubtypes.Bgra8;
-                case UnityEngine.Windows.WebCam.CapturePixelFormat.NV12:
+                case CapturePixelFormat.NV12:
                     return MediaEncodingSubtypes.Nv12;
-                case UnityEngine.Windows.WebCam.CapturePixelFormat.JPEG:
+                case CapturePixelFormat.JPEG:
                     return MediaEncodingSubtypes.Jpeg;
-                case UnityEngine.Windows.WebCam.CapturePixelFormat.PNG:
+                case CapturePixelFormat.PNG:
                     return MediaEncodingSubtypes.Png;
                 default:
                     return MediaEncodingSubtypes.Bgra8;
@@ -802,6 +805,41 @@ namespace HoloLensCameraStream
             this.width = width;
             this.height = height;
         }
+    }
+
+    public struct CameraParameters
+    {
+        public CapturePixelFormat pixelFormat;
+
+        public int cameraResolutionHeight;
+
+        public int cameraResolutionWidth;
+
+        public int frameRate;
+
+        public bool rotateImage180Degrees;
+
+        public float hologramOpacity;
+        public bool enableHolograms
+        {
+            get { throw new NotImplementedException(); }
+            set { throw new NotImplementedException(); }
+        }
+
+        public int videoStabilizationBufferSize;
+        public bool enableVideoStabilization
+        {
+            get { throw new NotImplementedException(); }
+            set { throw new NotImplementedException(); }
+        }
+
+        public CameraParameters(
+            CapturePixelFormat pixelFormat = CapturePixelFormat.BGRA32,
+            int cameraResolutionHeight = 720,
+            int cameraResolutionWidth = 1280,
+            int frameRate = 30,
+            bool rotateImage180Degrees = true)
+        { throw new NotImplementedException(); }
     }
 
 }
