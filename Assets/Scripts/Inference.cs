@@ -1,5 +1,4 @@
-﻿#define WEBCAM 
-
+﻿
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -7,7 +6,7 @@ using Unity.Barracuda;
 using System.Linq;
 using System;
 
-#if WEBCAM && UNITY_WSA //&& !UNITY_EDITOR
+#if WEBCAM && UNITY_WSA
 using UnityEngine.Windows.WebCam;
 #endif
 
@@ -79,18 +78,24 @@ public class Inference : MonoBehaviour
 #endif
 
 #else
+        //Setting texture for previsualizing input
+        preprocessMaterial.mainTexture = inputImage;
+
+        //Creating a rendertexture for the output render
         var targetRT = RenderTexture.GetTemporary(inputResolutionX, inputResolutionY, 0);
         Graphics.Blit(inputImage, targetRT, postprocessMaterial);
         m_Input = new Tensor(targetRT, 3);
-
+        
         //m_Input = new Tensor(1, inputResolutionY, inputResolutionX, 3);
 #endif
     }
 
+#if (WEBCAM)
     private void OnStartedVideoCaptureMode(VideoCapture.VideoCaptureResult result)
     {
         throw new NotImplementedException();
     }
+#endif
 
     void Update()
     {
