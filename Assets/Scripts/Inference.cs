@@ -6,10 +6,6 @@ using Unity.Barracuda;
 #if WEBCAM
 using System;
 using System.Linq;
-
-#if UNITY_WSA
-using UnityEngine.Windows.WebCam;
-#endif
 #endif
 
 public class Inference : MonoBehaviour
@@ -30,10 +26,6 @@ public class Inference : MonoBehaviour
     public int inputResolutionY = 32;
     public int inputResolutionX = 32;
 
-#if (WEBCAM) && UNITY_WSA
-    UnityEngine.Windows.WebCam.VideoCapture m_VideoCapture = null;
-#endif
-
     void Start()
     {
         Application.targetFrameRate = 60;
@@ -42,40 +34,8 @@ public class Inference : MonoBehaviour
         m_Worker = WorkerFactory.CreateWorker(WorkerFactory.Type.ComputePrecompiled, m_RuntimeModel, false);
 
 #if (WEBCAM)
-#if UNITY_WSA 
-        Resolution cameraResolution = VideoCapture.SupportedResolutions.OrderByDescending((res) => res.width * res.height).First();
-        Debug.Log(cameraResolution);
-
-        float cameraFramerate = VideoCapture.GetSupportedFrameRatesForResolution(cameraResolution).OrderByDescending((fps) => fps).First();
-        Debug.Log(cameraFramerate);
-
-        VideoCapture.CreateAsync(false, delegate (VideoCapture videoCapture)
-        {
-            if (videoCapture != null)
-            {
-                m_VideoCapture = videoCapture;
-                //Debug.Log("Created VideoCapture Instance!");
-
-                CameraParameters cameraParameters = new CameraParameters();
-                cameraParameters.hologramOpacity = 0.0f;
-                cameraParameters.frameRate = cameraFramerate;
-                cameraParameters.cameraResolutionWidth = cameraResolution.width;
-                cameraParameters.cameraResolutionHeight = cameraResolution.height;
-                cameraParameters.pixelFormat = CapturePixelFormat.BGRA32;
-
-                m_VideoCapture.StartVideoModeAsync(cameraParameters,
-                                                   VideoCapture.AudioState.ApplicationAndMicAudio,
-                                                   OnStartedVideoCaptureMode);
-            }
-            else
-            {
-                Debug.LogError("Failed to create VideoCapture Instance!");
-            }
-        });
-#else
         m_WebcamTexture = new WebCamTexture();
         m_WebcamTexture.Play();
-#endif // !(UNITY_WSA)
 #else
         //Setting texture for previsualizing input
         preprocessMaterial.mainTexture = inputImage;
@@ -86,15 +46,8 @@ public class Inference : MonoBehaviour
         m_Input = new Tensor(targetRT, 3);
         
         //m_Input = new Tensor(1, inputResolutionY, inputResolutionX, 3);
-#endif //(WEBCAM)
+#endif //!(WEBCAM)
     }
-
-#if (WEBCAM)
-    private void OnStartedVideoCaptureMode(VideoCapture.VideoCaptureResult result)
-    {
-        throw new NotImplementedException();
-    }
-#endif
 
     void Update()
     {
