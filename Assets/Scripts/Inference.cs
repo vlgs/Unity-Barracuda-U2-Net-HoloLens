@@ -1,4 +1,4 @@
-#define WEBCAM
+//#define WEBCAM
 
 using System;
 using System.Collections;
@@ -7,6 +7,7 @@ using UnityEngine;
 using Unity.Barracuda;
 using System.Linq;
 using System;
+using UnityEngine.UIElements;
 
 #if WEBCAM && UNITY_WSA //&& !UNITY_EDITOR
 using UnityEngine.Windows.WebCam;
@@ -20,7 +21,7 @@ public class Inference : MonoBehaviour
     private WebCamTexture m_WebcamTexture;
 #else
     private Tensor m_Input;
-    public Texture2D inputImage;
+    public Texture2D targetRTinputImage;
 #endif
 
 
@@ -43,7 +44,7 @@ public class Inference : MonoBehaviour
         Application.targetFrameRate = 60;
 
         m_RuntimeModel = ModelLoader.Load(inputModel, false);
-        m_Worker = WorkerFactory.CreateWorker(WorkerFactory.Type.ComputePrecompiled, m_RuntimeModel, false);
+        m_Worker = WorkerFactory.CreateWorker(WorkerFactory.Type.Auto, m_RuntimeModel, false);
 
 #if (WEBCAM)
 
@@ -83,20 +84,50 @@ public class Inference : MonoBehaviour
 #endif
 
 #else
-        var targetRT = RenderTexture.GetTemporary(inputResolutionX, inputResolutionY, 0);
-        Graphics.Blit(inputImage, targetRT, new Vector2(.5f,1f), new Vector2(0.3f,0f));//postprocessMaterial);
-        m_Input = new Tensor(targetRT, 3);
+        var offset = new Vector2(0f, 0f);
+        var scale = new Vector2(1f, 1f);
 
+        //to render texture for cropping
+        var targetRT = RenderTexture.GetTemporary(inputResolutionX, inputResolutionY, 0);
+        Graphics.Blit(targetRTinputImage, targetRT, scale, offset);//postprocessMaterial);
+
+        //Without normalizing, could have been...
+        //m_Input = new Tensor(targetRT, 3);
+
+        //to texture (for normalizing)
+        var oldRT = RenderTexture.active;
+        RenderTexture.active = targetRT;
         Texture2D result = new Texture2D(inputResolutionX, inputResolutionY,TextureFormat.RGBA32, 0, false);
-        result.SetPixels(inputImage.GetPixels(0,0, inputResolutionX, inputResolutionY));
+        result.ReadPixels(new Rect(0, 0, inputResolutionX, inputResolutionX), 0, 0);
         result.Apply();
 
+        //Normalize
         Tensor input = TransformInput(result.GetPixels32(), inputResolutionX, inputResolutionY);
 
+        //to tensor
+        m_Input = input;
+        //render in scene
+        preprocessMaterial.mainTexture = result; //or targetRT
 
-        preprocessMaterial.mainTexture = targetRT;
+        RenderTexture.active = oldRT;
+        
+        /*
+         * only good if no resize to do
+        //resize
+        Texture2D result = new Texture2D(inputResolutionX, inputResolutionY, TextureFormat.RGBA32, 0, false);
+        result.SetPixels32(0, 0, inputResolutionX, inputResolutionY, targetRTinputImage.GetPixels32());
+        result.Apply();
 
-        //m_Input = new Tensor(1, inputResolutionY, inputResolutionX, 3);
+        //transfrom
+        Tensor input = TransformInput(result.GetPixels32(), inputResolutionX, inputResolutionY);
+
+        //show in scene
+        preprocessMaterial.mainTexture = result;
+
+        //set as input
+        m_Input = input;
+        */
+        
 #endif
     }
 
@@ -127,6 +158,25 @@ public class Inference : MonoBehaviour
     }
 
 
+    public static Color32[] TransformColor(Color32[] pic, int width, int height)
+    {
+        Color32[] output = new Color32[width * height * 3];
+
+        for (int i = 0; i < pic.Length; ++i)
+        {
+            var color = pic[i];
+            output[i] = new Color32(
+                (byte)((color.r - IMAGE_MEAN) / IMAGE_STD * 255f),
+                (byte)((color.g - IMAGE_MEAN) / IMAGE_STD * 255f),
+                (byte)((color.b - IMAGE_MEAN) / IMAGE_STD * 255f),
+                255
+            );
+        }
+
+        return output;
+    }
+
+
     void Update()
     {
 #if (WEBCAM)
@@ -144,36 +194,29 @@ public class Inference : MonoBehaviour
         Tensor input = m_Input;
 #endif
         m_Worker.Execute(input);
-        Tensor tensor = m_Worker.PeekOutput("grid");
+        m_Worker.WaitForCompletion();
 
-        float[] res = tensor.data.Download(tensor.shape);
-        // float[] result = tensor.ToReadOnlyArray();
+        //could have been, in a coroutine
+        //yield return StartCoroutine(worker.StartManualSchedule(inputs));
+
+        Tensor tensor = m_Worker.PeekOutput("grid");//"016_convolutional");
 
         List<YoloResult> results = new List<YoloResult>();
 
-        for (int cy = 0; cy < COL_COUNT; cy++)
+        for (int cx = 0; cx < ROW_COUNT; cx++)
         {
-            for (int cx = 0; cx < ROW_COUNT; cx++)
+            for (int cy = 0; cy < COL_COUNT; cy++)
             {
                 for (int b = 0; b < BOXES_PER_CELL; b++)
                 {
                     var channel = (b * (CLASS_COUNT + BOX_INFO_FEATURE_COUNT));
-                    
-                    float tx = tensor[0,cx,cy,channel];
-                    float ty = tensor[0,cx,cy,channel + 1];
-                    float tw = tensor[0,cx,cy,channel + 2];
-                    float th = tensor[0,cx,cy,channel + 3];
-                    float tc = tensor[0,cx,cy,channel + 4];
-                    
-                    /*
-                    float tx = res[offset(channel    ,cx,cy)];
-                    float ty = res[offset(channel + 1,cx,cy)];
-                    float tw = res[offset(channel + 2,cx,cy)];
-                    float th = res[offset(channel + 3,cx,cy)];
-                    float tc = res[offset(channel + 4,cx,cy)];
-                    */
-                    
-                    
+                   
+                    float tx = tensor[0, cx, cy, channel] ;
+                    float ty = tensor[0, cx, cy, channel + 1];
+                    float tw = tensor[0, cx, cy, channel + 2];
+                    float th = tensor[0, cx, cy, channel + 3];
+                    float tc = tensor[0, cx, cy, channel + 4];
+
                     float x = ((float)cy + Sigmoid(tx)) * CELL_WIDTH;
                     float y = ((float)cx + Sigmoid(ty)) * CELL_HEIGHT;
 
@@ -186,25 +229,23 @@ public class Inference : MonoBehaviour
                         continue;
 
                     var classes = new float[CLASS_COUNT];
+                    var classOffset = channel + BOX_INFO_FEATURE_COUNT;
+
                     for (int c = 0; c < CLASS_COUNT; c++)
                     {
-                        classes[c] = tensor[0,cx,cy,channel + 5 + c];
-                        // classes[c] = res[offset(channel + 5 + c,cx,cy)];
+                        classes[c] = tensor[0, cx,cy, classOffset + c];
                     }
 
                     //softmax this
-                    // classes = Softmax(classes);
-                    var z_exp = classes.Select(Mathf.Exp);
-                    var sum_z_exp = z_exp.Sum();
-                    classes = z_exp.Select(i => i / sum_z_exp).ToArray();
-                    
+                    classes = Softmax(classes);
+
                     //argmax
                     float bestClassScore = classes.Max();
                     int bestClass = classes.ToList().IndexOf(bestClassScore);
 
                     float confidenceInClass = bestClassScore * confidence;
 
-                    if(confidenceInClass > confidenceThreshold)
+                    if (confidenceInClass > confidenceThreshold)
                     {
                         print($"{(Classes)bestClass} : {(bestClassScore*100).ToString("00")}% ({x};{y};{w};{h})");
 
@@ -236,7 +277,7 @@ public class Inference : MonoBehaviour
 #if (WEBCAM)
         // preprocessMaterial.mainTexture = targetRT;
 #endif
-        input.Dispose();
+        //input.Dispose();
     }
 
     void OnDestroy()
@@ -261,24 +302,6 @@ public class Inference : MonoBehaviour
 
         return exp.Select(v => (float)(v / sumExp)).ToArray();
     }
-
-
-    private int GetOffset(int x, int y, int channel)
-    {
-        // YOLO outputs a tensor that has a shape of 125x13x13, which
-        // WinML flattens into a 1D array.  To access a specific channel
-        // for a given (x,y) cell position, we need to calculate an offset
-        // into the array
-        return (channel * ROW_COUNT * COL_COUNT) + (y * COL_COUNT) + x;
-    }
-
-    private int offset(int channel, int x, int y)
-    {
-        return GetOffset(x,y,channel);
-        // return (channel * 25) + (y * COL_COUNT) + x;
-        // return channel*CHANNEL_COUNT + y*COL_COUNT + x*ROW_COUNT;
-    }
-
 
     internal struct YoloResult{
         internal float x,y,width,height,confidence;
