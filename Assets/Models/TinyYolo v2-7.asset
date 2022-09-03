@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1866e4acfcbfe46c5947026d22703536, type: 3}
+  m_Name: TinyYolo v2-7
+  m_EditorClassIdentifier: 
+  m_inputModel: {fileID: 5022602860645237092, guid: 25eb52af570c86f418c0500fb9028968,
+    type: 3}
+  m_inputResolutionHeight: 416
+  m_inputResolutionWidth: 416
+  m_outputLayerName: grid
+  m_confidenceThreshold: 0.3
+  m_preprocessMaterial: {fileID: 0}
+  m_postprocessMaterial: {fileID: 0}
